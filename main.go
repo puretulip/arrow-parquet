@@ -33,12 +33,12 @@ func main() {
 	// 예제 데이터
 	data := []map[string]interface{}{
 		{
-			"name":    "Alice",
-			"hobbies": []map[string]string{{"activity": "reading books"}, {"activity": "playing piano"}},
-		},
-		{
 			"name":    "Bob",
 			"hobbies": map[string]string{"activity": "cycling"}, // 리스트가 아닌 단일 값
+		},
+		{
+			"name":    "Alice",
+			"hobbies": []map[string]string{{"activity": "reading books"}, {"activity": "playing piano"}},
 		},
 	}
 
