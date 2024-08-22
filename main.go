@@ -18,11 +18,7 @@ func main() {
 	fields := []arrow.Field{
 		{
 			Name: "hobbies",
-			Type: arrow.ListOf(
-				arrow.StructOf(
-					arrow.Field{Name: "activity", Type: arrow.BinaryTypes.String}, // STRING 타입으로 설정
-				),
-			),
+			Type: arrow.BinaryTypes.String, // 초기에는 STRING 타입으로 설정
 		},
 		{
 			Name: "name",
@@ -40,30 +36,37 @@ func main() {
 			"name":    "Alice",
 			"hobbies": []map[string]string{{"activity": "reading books"}, {"activity": "playing piano"}},
 		},
+		{
+			"name":    []string{"Charlie", "Charles"}, // name 필드가 리스트인 경우
+			"hobbies": []map[string]string{{"activity": "swimming"}, {"activity": "running"}},
+		},
 	}
 
 	// 스키마를 업데이트해야 하는지 확인
-	isListType := false
-	for _, record := range data {
-		// hobbies가 리스트인지 아닌지 확인
-		switch hobbies := record["hobbies"].(type) {
-		case []map[string]string:
-			// hobbies 필드가 리스트라면, 스키마를 리스트 타입으로 변경
-			isListType = true
-		default:
-			// hobbies 필드가 리스트가 아니라면 에러 메시지 출력
-			log.Printf("Expected hobbies to be a list but it was not: %v", hobbies)
-		}
-	}
-
-	if isListType {
-		fields[0] = arrow.Field{
-			Name: "hobbies",
-			Type: arrow.ListOf(
-				arrow.StructOf(
-					arrow.Field{Name: "activity", Type: arrow.BinaryTypes.String}, // STRING 타입으로 설정
-				),
-			),
+	for i, field := range fields {
+		for _, record := range data {
+			// 필드가 리스트인지 아닌지 확인
+			switch value := record[field.Name].(type) {
+			case []map[string]string:
+				// 필드가 리스트라면, 스키마를 리스트 타입으로 변경
+				var structFields []arrow.Field
+				for k := range value[0] {
+					structFields = append(structFields, arrow.Field{Name: k, Type: arrow.BinaryTypes.String})
+				}
+				fields[i] = arrow.Field{
+					Name: field.Name,
+					Type: arrow.ListOf(arrow.StructOf(structFields...)),
+				}
+			case []string:
+				// 필드가 리스트라면, 스키마를 리스트 타입으로 변경
+				fields[i] = arrow.Field{
+					Name: field.Name,
+					Type: arrow.ListOf(arrow.BinaryTypes.String),
+				}
+			default:
+				// 필드가 리스트가 아니라면 에러 메시지 출력
+				log.Printf("Expected %s to be a list but it was not: %v", field.Name, value)
+			}
 		}
 	}
 
@@ -78,22 +81,38 @@ func main() {
 	defer b.Release()
 
 	for _, record := range data {
-		b.Field(1).(*array.StringBuilder).Append(record["name"].(string))
-
-		hobbiesBuilder := b.Field(0).(*array.ListBuilder)
-		hobbiesBuilder.Append(true)
-		hobbyStructBuilder := hobbiesBuilder.ValueBuilder().(*array.StructBuilder)
-		activityBuilder := hobbyStructBuilder.FieldBuilder(0).(*array.StringBuilder)
-
-		switch hobbies := record["hobbies"].(type) {
-		case []map[string]string:
-			for _, hobby := range hobbies {
-				hobbyStructBuilder.Append(true)
-				activityBuilder.Append(hobby["activity"])
+		for i, field := range fields {
+			switch value := record[field.Name].(type) {
+			case string:
+				b.Field(i).(*array.StringBuilder).Append(value)
+			case map[string]string:
+				// 단일 값인 경우 처리
+				for _, v := range value {
+					b.Field(i).(*array.StringBuilder).Append(v)
+				}
+			case []map[string]string:
+				listBuilder := b.Field(i).(*array.ListBuilder)
+				listBuilder.Append(true)
+				structBuilder := listBuilder.ValueBuilder().(*array.StructBuilder)
+				structType := structBuilder.Type().(*arrow.StructType)
+				for _, item := range value {
+					structBuilder.Append(true)
+					for j := 0; j < structBuilder.NumField(); j++ {
+						fieldName := structType.Field(j).Name
+						structBuilder.FieldBuilder(j).(*array.StringBuilder).Append(item[fieldName])
+					}
+				}
+			case []string:
+				listBuilder := b.Field(i).(*array.ListBuilder)
+				listBuilder.Append(true)
+				stringBuilder := listBuilder.ValueBuilder().(*array.StringBuilder)
+				for _, item := range value {
+					stringBuilder.Append(item)
+				}
+			default:
+				// 필드가 리스트가 아니라면 단일 값으로 처리
+				b.Field(i).(*array.StringBuilder).Append(fmt.Sprintf("%v", value))
 			}
-		case map[string]string:
-			hobbyStructBuilder.Append(true)
-			activityBuilder.Append(hobbies["activity"])
 		}
 	}
 
